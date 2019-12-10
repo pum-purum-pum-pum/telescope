@@ -1,115 +1,28 @@
-use iced::{button, Background, Button, Column, Element, Length, Row, Sandbox, Settings, Text};
-use rand::{Rng};
-use std::{thread, time};
-// use serde::{Deserialize, Serialize};
-const MAX_DEPTH: usize = 30;
-const MAX_UNITS: u16 = 1000; // max width of span (width of 0.0..1.0 span)
+use iced::{
+    button, Background, Button, Column, Container, Element, Length, Row, Sandbox, Settings, Text, Scrollable, scrollable
+};
+use rand::Rng;
+
+const MAX_DEPTH: usize = 100;
+const MAX_UNITS: u16 = 700; // max width of span (width of 0.0..1.0 span)
 const BACKGROUND_COLOR: [f32; 3] = [1., 1., 1.];
 const SPACING: u16 = 1;
 use flame::{self, Span};
-use scope::Region;
+// use scope::Region;
+use misc::{generate_spans, test_spans};
+use scope::RegionTree;
+use std::fs::File;
 
+mod misc;
 mod scope;
 
-#[derive(Debug)]
-struct FlattenRegions {
-    pub scopes: Vec<Vec<Region<f64>>>,
-}
-
-impl Default for FlattenRegions {
-    fn default() -> Self {
-        FlattenRegions {
-            scopes: (0..MAX_DEPTH).map(|_| Vec::new()).collect(),
-        }
-    }
-}
-
-impl FlattenRegions {
-    fn from_flame_spans(spans: Vec<Span>) -> Self {
-        // first traverse depth for normalization parameters
-        let mut start = std::u64::MAX;
-        let mut end = 0u64;
-        for span in spans.iter() {
-            start = start.min(span.start_ns);
-            end = end.max(span.end_ns);
-        }
-        dbg!(start, end);
-        let normalization = (end - start) as f64;
-        let mut last_spans = spans;
-        let mut result_scopes: Vec<Vec<Region<f64>>> = (0..MAX_DEPTH).map(|_| Vec::new()).collect();
-        for depth in 0..MAX_DEPTH {
-            let mut new_level_spans = vec![];
-            for span in last_spans.iter() {
-                let start = (span.start_ns - start) as f64 / normalization;
-                let end = start + (span.end_ns - span.start_ns) as f64 / normalization;
-                result_scopes[depth].push(Region { start, end });
-                // inefficient clone here. possible to store just reference
-                new_level_spans.extend(span.children.iter().map(|span| span.clone()));
-            }
-            last_spans = new_level_spans;
-        }
-        FlattenRegions {
-            scopes: result_scopes,
-        }
-    }
-}
-
 pub fn main() {
-    test_spans();
-    // generate_spans(0);
-    dbg!(flame::spans());
-    dbg!(FlattenRegions::from_flame_spans(flame::spans()));
+    // test_spans();
+    generate_spans(0);
+    // dbg!(flame::spans());
+    // dbg!(FlattenRegions::from_flame_spans(flame::spans()));
+    // flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
     Profile::run(Settings::default())
-}
-
-pub fn dummy_sleep(millis: u64) {
-    let ten_millis = time::Duration::from_millis(millis);
-    thread::sleep(ten_millis);
-}
-
-pub fn generate_spans(depth: usize) {
-    let mut rng = rand::thread_rng();
-    if depth == 15 {
-        let p = 0.7;
-        if rng.gen_range(0.0, 1.0) > 1. - p {
-            dummy_sleep(10);
-        }
-        return
-    }
-    if depth > 10 {
-        let p = 0.8;
-        if rng.gen_range(0.0, 1.0) > 1. - p {
-            return
-        }
-    }
-    for i in 0..rng.gen_range(1, 3) {
-        let name = format!("span_{}_{}", depth, i);
-        flame::start(name.clone());
-        generate_spans(depth + 1);
-        flame::end(name.clone());
-    }
-}
-
-pub fn test_spans() {
-    flame::start("all");
-    dummy_sleep(10);
-    {
-        flame::start("inside1");
-        dummy_sleep(20);
-        flame::end("inside1");
-        flame::start("inside2");
-        dummy_sleep(40);
-        {
-            flame::start("deep_inside1");
-            dummy_sleep(20);
-            flame::end("deep_inside1");
-            flame::start("deep_inside2");
-            dummy_sleep(50);
-            flame::end("deep_inside2");
-        }
-        flame::end("inside2");
-    }
-    flame::end("all");
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -119,144 +32,100 @@ pub enum ScopeMessage {
     Free,
 }
 
-#[derive(Debug, Default)]
-struct Scope {
+struct ScopeTree {
     pub width: u16,
     pub desc: String,
     pub color: [f32; 3],
     pub state: button::State,
+    children: Vec<ScopeTree>,
 }
 
-impl Scope {
+impl ScopeTree {
     pub fn view(&mut self) -> Element<ScopeMessage> {
-        Button::new(&mut self.state, Text::new(self.desc.clone()))
+        let button = Button::new(&mut self.state, Text::new(self.desc.clone()))
             .background(Background::Color(self.color.into()))
-            // .padding(0)
-            .height(Length::Units(15))
+            .height(Length::Units(40))
             .width(Length::Units(self.width))
-            .on_press(ScopeMessage::Pressed)
-            .into()
-    }
-}
-
-#[derive(Debug, Default)]
-struct LevelScope {
-    pub scopes: Vec<Scope>
-}
-
-impl LevelScope {
-    pub fn view(&mut self) -> Element<Message> {
-        let scopes: Element<_> = self
-            .scopes
+            .on_press(ScopeMessage::Pressed);
+        let subtree = self
+            .children
             .iter_mut()
-            .enumerate()
-            .fold(Row::new().spacing(SPACING), |column, (_, scope)| {
-                column.push(
-                    scope
-                        .view()
-                        .map(move |message| Message::ScopeMessage(message)),
-                )
-            })
-            .into();
-        scopes
+            .fold(Row::new().spacing(SPACING), |row, scope| {
+                row.push(scope.view())
+            });
+        let subtree_container = Container::new(subtree).width(Length::Units(self.width)). center_x().center_y();
+        let column = Column::new()
+            .spacing(SPACING)
+            .push(button)
+            .push(subtree_container);
+        column.into()
     }
 }
 
-#[derive(Default)]
-struct Profile {
-    value: i32,
-    test_buttons: [Scope; 20],
-    scopes: Vec<LevelScope>, // regions: FlattenRegions,
-}
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
     ScopeMessage(ScopeMessage),
 }
 
+fn from_regions(regions: &Vec<RegionTree<f64>>) -> Vec<ScopeTree> {
+    let mut rng = rand::thread_rng();
+    regions
+        .iter()
+        .map(|region| ScopeTree {
+            width: (MAX_UNITS as f64 * (region.end - region.start)).round() as u16,
+            desc: "123".to_string(),
+            color: [rng.gen_range(0., 1.), rng.gen_range(0., 1.), rng.gen_range(0., 1.)],
+            children: from_regions(&region.regions),
+            state: Default::default(),
+        })
+        .collect()
+}
+
+struct Profile {
+    scroll: scrollable::State,
+    root: ScopeTree
+}
+
 impl Sandbox for Profile {
     type Message = Message;
 
     fn new() -> Self {
-        let mut scopes: Vec<LevelScope> = (0..MAX_DEPTH).map(|_| Default::default()).collect();
-        let regions = FlattenRegions::from_flame_spans(flame::spans()).scopes;
-        for i in 0..MAX_DEPTH {
-            let mut s = vec![];
-            let mut start = 0.;
-            for region in regions[i].iter() {
-                if ((MAX_UNITS as f64 * (region.start - start)).round() as u16) > SPACING {
-                    // spacing
-                    s.push(Scope {
-                        width: (MAX_UNITS as f64 * (region.start - start)).round() as u16 - SPACING,// TODO SPACING min size
-                        color: BACKGROUND_COLOR,
-                        ..Default::default()
-                    })
-                }
-                // dbg!( MAX_UNITS as f64 * (region.end - region.start));
-                start = region.end;
-                if (MAX_UNITS as f64 * (region.end - region.start)).round() as u16 > SPACING {
-                    s.push(Scope {
-                        width: (MAX_UNITS as f64 * (region.end - region.start)).round() as u16 - SPACING,// TODO SPACING min size
-                        color: [0.11, 0.42, 0.87],
-                        ..Default::default()
-                    });
-                }
+        let regions = RegionTree::from_flame(&flame::spans());
+        Profile {
+            scroll: Default::default(),
+            root: ScopeTree {
+                width: MAX_UNITS,
+                desc: "root".to_string(),
+                color: [0., 0., 0.],
+                state: Default::default(),
+                children: from_regions(&regions),
             }
-            scopes[i] = LevelScope{scopes: s};
-            // scopes[i] = LevelScope {
-            // 	scopes: regions[i]
-	           //      .iter()
-	           //      .map(|region| Scope {
-	           //          width: (MAX_UNITS as f64 * (region.end - region.start)) as u16,
-            //             color: [0.11, 0.42, 0.87],
-	           //          ..Default::default()
-	           //      })
-	           //      .collect()
-	           //  }
-        }
-        Self {
-        	scopes,
-            ..Default::default()
         }
     }
 
     fn title(&self) -> String {
-        String::from("A simple counter")
+        String::from("Profiler")
     }
 
     fn update(&mut self, message: Message) {
+        // flame::clear();
+        // generate_spans(0);
+        // let regions = RegionTree::from_flame(&flame::spans());
+        // self.root.children = from_regions(&regions);
         match message {
             Message::ScopeMessage(_) => {}
         }
     }
 
     fn view(&mut self) -> Element<Message> {
-        // let mut profile = Column::new();
-        // for i in 0..MAX_DEPTH {
-        // 	// let level = 
-	       //  // let scopes: Element<_> = self
-	       //  //     .scopes[i]
-	       //  //     .iter_mut()
-	       //  //     .enumerate()
-	       //  //     .fold(Row::new().spacing(2), |column, (i, scope)| {
-	       //  //         column.push(
-	       //  //             scope
-	       //  //                 .view()
-	       //  //                 .map(move |message| Message::ScopeMessage(message)),
-	       //  //         )
-	       //  //     })
-	       //  //     .into();
-	       //  profile = profile.push(self.scopes[i].view());
-        // };
-        self.scopes
-        	.iter_mut()
-        	.enumerate()
-            .fold(Column::new().spacing(SPACING), |column, (_, level)| {
-                column.push(
-                    level
-                        .view()
-                        // .map(move |message| Message::ScopeMessage(message)),
-                )
-            }).into()
+        let content = self.root
+            .view()
+            .map(move |message| Message::ScopeMessage(message));
+        Scrollable::new(&mut self.scroll)
+            .push(
+                Container::new(content).width(Length::Fill).center_x(),
+            )
+            .into()
     }
 }

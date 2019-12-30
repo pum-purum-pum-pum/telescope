@@ -1,17 +1,22 @@
-use iced::{
-    button, Background, Button, Column, Container, Element, Length, Row, Sandbox, Settings, Text, Scrollable, scrollable
-};
+use std::collections::VecDeque;
+use std::rc::Rc;
+use std::cell::{RefCell, Cell};
 use rand::Rng;
 
-const MAX_DEPTH: usize = 100;
-const MAX_UNITS: u16 = 700; // max width of span (width of 0.0..1.0 span)
-const BACKGROUND_COLOR: [f32; 3] = [1., 1., 1.];
-const SPACING: u16 = 1;
+use iced::{
+    button, scrollable, Background, Button, Column, Container, Element, Length, Row, Sandbox,
+    Scrollable, Settings, Text,
+};
+use id_arena::{Arena, Id};
 use flame::{self, Span};
-// use scope::Region;
+
 use misc::{generate_spans, test_spans};
 use scope::RegionTree;
-use std::fs::File;
+
+type SharedArena = Rc<RefCell<Arena<ScopeTree>>>;
+
+const MAX_UNITS: u16 = 700; // max width of span (width of 0.0..1.0 span)
+const SPACING: u16 = 1;
 
 mod misc;
 mod scope;
@@ -22,7 +27,7 @@ pub fn main() {
     // dbg!(flame::spans());
     // dbg!(FlattenRegions::from_flame_spans(flame::spans()));
     // flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
-    Profile::run(Settings::default())
+    Profiler::run(Settings::default())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -32,66 +37,106 @@ pub enum ScopeMessage {
     Free,
 }
 
+#[derive(Clone)]
 struct ScopeTree {
     pub width: u16,
     pub desc: String,
     pub color: [f32; 3],
     pub state: button::State,
-    children: Vec<ScopeTree>,
+    children: Vec<Rc<RefCell<ScopeTree>>>,
+    // children: Vec<Id<ScopeTree>>,
 }
 
 impl ScopeTree {
     pub fn view(&mut self) -> Element<ScopeMessage> {
         let button = Button::new(&mut self.state, Text::new(self.desc.clone()))
             .background(Background::Color(self.color.into()))
-            .height(Length::Units(40))
+            .height(Length::Units(30))
             .width(Length::Units(self.width))
             .on_press(ScopeMessage::Pressed);
         let subtree = self
             .children
             .iter_mut()
             .fold(Row::new().spacing(SPACING), |row, scope| {
-                row.push(scope.view())
+                row.push(scope.borrow_mut().view())
             });
-        let subtree_container = Container::new(subtree).width(Length::Units(self.width)). center_x().center_y();
+        let subtree_container = Container::new(subtree)
+            .width(Length::Units(self.width))
+            .center_x()
+            .center_y();
         let column = Column::new()
             .spacing(SPACING)
             .push(button)
             .push(subtree_container);
         column.into()
+        // button.into()
     }
 }
-
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
     ScopeMessage(ScopeMessage),
+    UpdateProfile(usize),
 }
 
-fn from_regions(regions: &Vec<RegionTree<f64>>) -> Vec<ScopeTree> {
+fn from_regions(regions: &Vec<RegionTree<f64>>) -> Vec<Rc<RefCell<ScopeTree>>> {
     let mut rng = rand::thread_rng();
     regions
         .iter()
-        .map(|region| ScopeTree {
-            width: (MAX_UNITS as f64 * (region.end - region.start)).round() as u16,
-            desc: "123".to_string(),
-            color: [rng.gen_range(0., 1.), rng.gen_range(0., 1.), rng.gen_range(0., 1.)],
-            children: from_regions(&region.regions),
-            state: Default::default(),
+        .map(|region| {
+            let children = from_regions(&region.regions);
+            Rc::new(RefCell::new(ScopeTree {
+                width: (MAX_UNITS as f64 * (region.end - region.start)).round() as u16,
+                desc: region.desc.clone(),
+                color: [
+                    rng.gen_range(0., 1.),
+                    rng.gen_range(0., 1.),
+                    rng.gen_range(0., 1.),
+                ],
+                children: children,
+                state: Default::default(),
+            }))
         })
         .collect()
 }
 
-struct Profile {
-    scroll: scrollable::State,
-    root: ScopeTree
+struct Pick {
+    pub state: button::State,
+    pub color: [f32; 3],
+    pub desc: String,
+    // pub profile: Profile,
 }
 
-impl Sandbox for Profile {
-    type Message = Message;
+impl Pick {
+    fn view(&mut self, id: usize) -> Element<Message> {
+        Button::new(&mut self.state, Text::new(self.desc.clone()))
+            .background(Background::Color(self.color.into()))
+            .height(Length::Units(100))
+            .width(Length::Units(20))
+            .on_press(Message::UpdateProfile(id))
+            .into()
+    }
+}
 
-    fn new() -> Self {
-        let regions = RegionTree::from_flame(&flame::spans());
+struct Profiler {
+    picks: VecDeque<Pick>,
+    profiles: VecDeque<Profile>,
+    profile_id: usize,
+}
+
+#[derive(Clone)]
+struct Profile {
+    scroll: scrollable::State,
+    root: ScopeTree,
+    nodes: Arena<ScopeTree>,
+}
+
+impl Profile {
+    pub fn new(spans: &Vec<Span>) -> Self {
+        let regions = RegionTree::from_flame(spans);
+        let mut nodes = Arena::new();
+        // let nodes = Rc::new(RefCell::new(nodes));
+        let tree = from_regions(&regions);
         Profile {
             scroll: Default::default(),
             root: ScopeTree {
@@ -99,8 +144,67 @@ impl Sandbox for Profile {
                 desc: "root".to_string(),
                 color: [0., 0., 0.],
                 state: Default::default(),
-                children: from_regions(&regions),
-            }
+                children: tree,
+            },
+            nodes: nodes
+        }
+    }
+
+    // fn view_node<'a>(&'a self, node: Id<ScopeTree>) -> Element<'a, Message> {
+    //     let desc = self.nodes.borrow()[node].desc.clone();
+    //     let width = self.nodes.borrow()[node].width;
+    //     // let color = self.nodes[node].color.into();
+    //     let mut nodes = self.nodes.borrow_mut();
+    //     let button = nodes[node].view()
+    //         .map(move |message| Message::ScopeMessage(message));
+    //     let subtree = self.nodes.borrow_mut()[node]
+    //         .children
+    //         .iter_mut()
+    //         .fold(Row::new().spacing(SPACING), |row, scope| {
+    //             row.push(self.view_node(*scope))//nodes.borrow_mut()[*scope].view())
+    //         });
+    //     let subtree_container = Container::new(subtree)
+    //         .width(Length::Units(width))
+    //         .center_x()
+    //         .center_y();
+    //     let column = Column::new()
+    //         .spacing(SPACING)
+    //         .push(button)
+    //         .push(subtree_container);
+    //     column.into()
+    // }
+
+    fn view(&mut self) -> Element<Message> {
+        let content = self
+            .root
+            .view()
+            .map(move |message| Message::ScopeMessage(message));
+        Scrollable::new(&mut self.scroll)
+            .push(Container::new(content).width(Length::Fill).center_x())
+            .into()
+    }
+}
+
+impl Sandbox for Profiler {
+    type Message = Message;
+
+    fn new() -> Self {
+        let mut picks = VecDeque::new();
+        let mut profiles = VecDeque::new();
+        for i in 0..10 {
+            flame::clear();
+            generate_spans(0);
+            picks.push_back(Pick {
+                state: Default::default(),
+                color: [0.5, 0.5, 0.5],
+                desc: i.to_string(),
+            });
+            profiles.push_back(Profile::new(&flame::spans()));
+        }
+        Profiler {
+            picks: picks,
+            profiles: profiles,
+            profile_id: 0,
         }
     }
 
@@ -115,17 +219,28 @@ impl Sandbox for Profile {
         // self.root.children = from_regions(&regions);
         match message {
             Message::ScopeMessage(_) => {}
+            Message::UpdateProfile(id) => {
+                self.profile_id = id
+            }
         }
     }
 
     fn view(&mut self) -> Element<Message> {
-        let content = self.root
-            .view()
-            .map(move |message| Message::ScopeMessage(message));
-        Scrollable::new(&mut self.scroll)
+        let picks = self
+            .picks
+            .iter_mut()
+            .enumerate()
+            .fold(Row::new().spacing(SPACING), |row, pick| {
+                row.push(pick.1.view(pick.0))
+            });
+        Column::new()
             .push(
-                Container::new(content).width(Length::Fill).center_x(),
+                Container::new(picks)
+                    .width(Length::Units(MAX_UNITS))
+                    .center_x()
+                    .center_y(),
             )
+            .push(self.profiles[self.profile_id].view())
             .into()
     }
 }

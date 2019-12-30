@@ -6,15 +6,16 @@ pub fn dummy_sleep(nanos: u64) {
     thread::sleep(ten_millis);
 }
 
+// TODO remove depth somehow (we don't want to call the function with 0 depth)
 pub fn generate_spans(depth: usize) {
     let mut rng = rand::thread_rng();
     dummy_sleep(1);
-    if depth == 20 {
+    if depth == 10 {
         // let p = 0.5;
         // dummy_sleep(10);
         return;
     }
-    if depth > 10 {
+    if depth > 5 {
         let p = 0.5;
         if rng.gen_range(0.0, 1.0) > 1. - p {
             return;

@@ -7,15 +7,15 @@ pub fn dummy_sleep(nanos: u64) {
 }
 
 // TODO remove depth somehow (we don't want to call the function with 0 depth)
-pub fn generate_spans(depth: usize) {
+pub fn generate_spans(depth: usize, max_depth: usize) {
     let mut rng = rand::thread_rng();
     dummy_sleep(1);
-    if depth == 10 {
+    if depth == max_depth {
         // let p = 0.5;
         // dummy_sleep(10);
         return;
     }
-    if depth > 5 {
+    if depth > max_depth / 2 {
         let p = 0.5;
         if rng.gen_range(0.0, 1.0) > 1. - p {
             return;
@@ -24,7 +24,7 @@ pub fn generate_spans(depth: usize) {
     for i in 0..rng.gen_range(1, 3) {
         let name = format!("span_{}_{}", depth, i);
         flame::start(name.clone());
-        generate_spans(depth + 1);
+        generate_spans(depth + 1, max_depth);
         flame::end(name.clone());
     }
 }

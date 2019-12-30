@@ -7,10 +7,7 @@ pub struct NormalizationParams {
 }
 
 // recursibly parse flame tree into region tree (TODO just parse into ScopeTree without RegionTree)
-pub fn from_flame(
-    spans: &Vec<Span>, 
-    norm_params: &NormalizationParams
-) -> Vec<RegionTree<f64>> {
+pub fn from_flame(spans: &Vec<Span>, norm_params: &NormalizationParams) -> Vec<RegionTree<f64>> {
     spans
         .iter()
         .map(|span| {
@@ -20,7 +17,7 @@ pub fn from_flame(
                 start,
                 end,
                 regions: from_flame(&span.children, norm_params),
-                desc: span.name.to_string()
+                desc: span.name.to_string(),
             }
         })
         .collect()

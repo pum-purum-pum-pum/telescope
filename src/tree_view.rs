@@ -1,10 +1,11 @@
-use crate::scope::NormalizationParams;
 use crate::tree_profile::Scope;
 use crate::tree_profile::TreeProfile;
-use crate::{MAX_UNITS, SPACING, SCOPE_HEIGHT};
+use crate::{MAX_UNITS, SCOPE_HEIGHT, SPACING};
 
+use crate::BUTTON_BORDER_RADIUS;
 use iced::{button, Background, Button, Column, Container, Element, Length, Row, Text};
 use id_arena::{Arena, Id};
+
 #[derive(Debug, Clone, Copy)]
 pub struct SubProfile(pub Id<TreeProfile>);
 
@@ -22,6 +23,7 @@ impl TreeView {
             .background(Background::Color(self.data.color.into()))
             .height(Length::Units(SCOPE_HEIGHT))
             .width(Length::Units(self.data.width))
+            .border_radius(BUTTON_BORDER_RADIUS)
             .on_press(SubProfile(self.profile_tree));
         let subtree = self
             .children
@@ -35,8 +37,8 @@ impl TreeView {
             .center_y();
         let column = Column::new()
             .spacing(SPACING)
-            .push(button)
-            .push(subtree_container);
+            .push(subtree_container)
+            .push(button);
         column.into()
     }
 

@@ -21,7 +21,8 @@ pub fn generate_spans(depth: usize, max_depth: usize) {
             return;
         }
     }
-    for i in 0..rng.gen_range(1, 3) {
+    let max_spans = if depth < 4 {4} else {3};
+    for i in 0..rng.gen_range(1, max_spans) {
         let name = format!("span_{}_{}", depth, i);
         flame::start(name.clone());
         generate_spans(depth + 1, max_depth);
@@ -29,7 +30,7 @@ pub fn generate_spans(depth: usize, max_depth: usize) {
     }
 }
 
-pub fn test_spans() {
+pub fn _test_spans() {
     flame::start("all");
     dummy_sleep(10);
     {

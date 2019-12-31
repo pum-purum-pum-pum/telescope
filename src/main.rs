@@ -23,11 +23,7 @@ mod tree_profile;
 mod tree_view;
 
 pub fn main() {
-    // test_spans();
     generate_spans(0, MAX_GENERATED_DEPTH);
-    // dbg!(flame::spans());
-    // dbg!(FlattenRegions::from_flame_spans(flame::spans()));
-    // flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
     Profiler::run(Settings::default())
 }
 
@@ -42,7 +38,6 @@ struct Pick {
     pub color: [f32; 3],
     pub desc: String,
     pub height: f32,
-    // pub profile: Profile,
 }
 
 impl Pick {

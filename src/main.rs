@@ -89,11 +89,6 @@ impl Sandbox for Profiler {
     }
 
     fn update(&mut self, message: Message) {
-        // flame::clear();
-        // generate_spans(0);
-        // let regions = RegionTree::from_flame(&flame::spans());
-        // self.root.children = from_regions(&regions);
-        dbg!(message);
         match message {
             Message::SubProfile(SubProfile(node_id)) => {
                 dbg!("update");
